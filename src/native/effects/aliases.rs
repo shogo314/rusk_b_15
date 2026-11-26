@@ -70,23 +70,35 @@ pub(crate) fn resolve(
 ) -> Result<Vec<Projection>, String> {
     let mut ty = root.to_owned();
     let mut projections = vec![];
-    for name in path {
+    let mut names = path.iter();
+    while let Some(name) = names.next() {
         let kind = types.get(&ty).ok_or("unknown native alias type")?;
-        let field = kind
-            .retained_fields()
-            .iter()
-            .position(|(n, _)| n == name)
-            .map(Projection::Retained)
-            .or_else(|| {
-                kind.fields()
-                    .and_then(|fields| fields.iter().position(|(n, _)| n == name))
-                    .map(Projection::Field)
-            })
-            .or_else(|| {
-                (name == "element" && matches!(kind, Type::Vector(_) | Type::Buffer(_)))
-                    .then_some(Projection::Element)
-            })
-            .ok_or("unknown native alias member")?;
+        let field = if let Type::Enum(variants) = kind {
+            let variant = variants
+                .iter()
+                .position(|(variant, _)| variant == name)
+                .ok_or("unknown native alias variant")?;
+            let field = names
+                .next()
+                .and_then(|field| field.parse::<usize>().ok())
+                .ok_or("native alias variant requires a payload index")?;
+            Projection::VariantField { variant, field }
+        } else {
+            kind.retained_fields()
+                .iter()
+                .position(|(n, _)| n == name)
+                .map(Projection::Retained)
+                .or_else(|| {
+                    kind.fields()
+                        .and_then(|fields| fields.iter().position(|(n, _)| n == name))
+                        .map(Projection::Field)
+                })
+                .or_else(|| {
+                    (name == "element" && matches!(kind, Type::Vector(_) | Type::Buffer(_)))
+                        .then_some(Projection::Element)
+                })
+                .ok_or("unknown native alias member")?
+        };
         ty = crate::analysis::effects::project_type(&ty, std::slice::from_ref(&field), types)?;
         projections.push(field);
     }

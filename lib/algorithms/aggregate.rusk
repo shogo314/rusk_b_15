@@ -1,39 +1,53 @@
 //! 走査順の加算と、最小・最大の要素および位置の取得です。
 
+// Keep the original seed object for empty input and for custom addition.
+extern fn __aggregation_seed__<T>(value: T) -> T {
+    effects: "read_fresh",
+    aliases: "return=0",
+    return_abi: "object",
+    code: "Obj<@{T}> @{fn}(Obj<@{T}> value, Loc) { return value; }",
+}
+
 /// 要素型の引数なしコンストラクタから始め、左から順に加算します。
 extern fn sum<S, I, T>(source: S) -> T {
+    effects: "checked_cursor_consume",
     depends: "__runtime_aggregation__",
-    code: "@{return T} @{fn}(Obj<@{S}> source, Loc loc) { auto it = @{boxed_call __iter__(S)->I}(source, loc); auto initial = @{boxed_call T()->T}(loc); return @{finish T}(rusk_sum_iter(it, initial, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_next__(I)->T}, @{boxed_call __add__(T,T)->T})); }",
+    code: "@{return T} @{fn}(Obj<@{S}> source, Loc loc) { auto it = @{boxed_call __iter__(S)->I via (0) into $cursor}(source, loc); auto initial = @{boxed_call T()->T via () into $total}(loc); return @{finish T}(rusk_sum_iter(it, initial, loc, @{boxed_call __iter_has_next__(I)->Bool via ($cursor) into discard}, @{boxed_call __iter_next__(I)->T via ($cursor) into $element}, @{boxed_call __add__(T,T)->T via ($total,$element) into $total again and return})); }",
 }
 
 /// 初期値から始めて左から順に加算します。空なら初期値を共有して返します。
 extern fn sum<S, I, T>(source: S, initial: T) -> T {
+    effects: "checked_cursor_consume",
     depends: "__runtime_aggregation__",
-    code: "@{return T} @{fn}(Obj<@{S}> source, Obj<@{T}> initial, Loc loc) { auto it = @{boxed_call __iter__(S)->I}(source, loc); return @{finish T}(rusk_sum_iter(it, initial, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_next__(I)->T}, @{boxed_call __add__(T,T)->T})); }",
+    code: "@{return T} @{fn}(Obj<@{S}> source, Obj<@{T}> initial, Loc loc) { auto it = @{boxed_call __iter__(S)->I via (0) into $cursor}(source, loc); return @{finish T}(rusk_sum_iter(it, @{boxed_call __aggregation_seed__(T)->T via (1) into $total}(initial, loc), loc, @{boxed_call __iter_has_next__(I)->Bool via ($cursor) into discard}, @{boxed_call __iter_next__(I)->T via ($cursor) into $element}, @{boxed_call __add__(T,T)->T via ($total,$element) into $total again and return})); }",
 }
 
 /// 要素の全順序で最小となる最初の要素を共有して返します。空ならNoneです。
 extern fn min<S, I, T>(source: S) -> Option<T> {
+    effects: "checked_cursor_consume",
     depends: "__runtime_aggregation__",
-    code: "Obj<@{Option<T>}> @{fn}(Obj<@{S}> source, Loc loc) { auto it = @{boxed_call __iter__(S)->I}(source, loc); auto selected = rusk_extreme<false, false>(it, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_next__(I)->T}, @{value_call __total_less__<T>(T,T)->Bool}); if (!selected.value) return rusk_enum_make<@{Option<T>},1>(); return rusk_enum_make<@{Option<T>},0>(std::move(selected.value)); }",
+    code: "Obj<@{Option<T>}> @{fn}(Obj<@{S}> source, Loc loc) { auto it = @{boxed_call __iter__(S)->I via (0) into $cursor}(source, loc); auto selected = rusk_extreme<false, false>(it, loc, @{boxed_call __iter_has_next__(I)->Bool via ($cursor) into discard}, @{boxed_call __iter_next__(I)->T via ($cursor) into $element and return.Some.0}, @{value_call __total_less__<T>(T,T)->Bool via ($element,$element) into discard}); if (!selected.value) return rusk_enum_make<@{Option<T>},1>(); return rusk_enum_make<@{Option<T>},0>(std::move(selected.value)); }",
 }
 
 /// 要素の全順序で最大となる最初の要素を共有して返します。空ならNoneです。
 extern fn max<S, I, T>(source: S) -> Option<T> {
+    effects: "checked_cursor_consume",
     depends: "__runtime_aggregation__",
-    code: "Obj<@{Option<T>}> @{fn}(Obj<@{S}> source, Loc loc) { auto it = @{boxed_call __iter__(S)->I}(source, loc); auto selected = rusk_extreme<true, false>(it, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_next__(I)->T}, @{value_call __total_less__<T>(T,T)->Bool}); if (!selected.value) return rusk_enum_make<@{Option<T>},1>(); return rusk_enum_make<@{Option<T>},0>(std::move(selected.value)); }",
+    code: "Obj<@{Option<T>}> @{fn}(Obj<@{S}> source, Loc loc) { auto it = @{boxed_call __iter__(S)->I via (0) into $cursor}(source, loc); auto selected = rusk_extreme<true, false>(it, loc, @{boxed_call __iter_has_next__(I)->Bool via ($cursor) into discard}, @{boxed_call __iter_next__(I)->T via ($cursor) into $element and return.Some.0}, @{value_call __total_less__<T>(T,T)->Bool via ($element,$element) into discard}); if (!selected.value) return rusk_enum_make<@{Option<T>},1>(); return rusk_enum_make<@{Option<T>},0>(std::move(selected.value)); }",
 }
 
 /// 要素の全順序で最小となる最初の位置を0始まりで返します。空ならNoneです。
 extern fn argmin<S, I, T>(source: S) -> Option<Int> {
+    effects: "checked_cursor_consume",
     depends: "__runtime_aggregation__",
-    code: "Obj<@{Option<Int>}> @{fn}(Obj<@{S}> source, Loc loc) { auto it = @{boxed_call __iter__(S)->I}(source, loc); auto selected = rusk_extreme<false, true>(it, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_next__(I)->T}, @{value_call __total_less__<T>(T,T)->Bool}); if (!selected.value) return rusk_enum_make<@{Option<Int>},1>(); selected.value.reset(); rusk_guard_iter(it, loc); return rusk_enum_make<@{Option<Int>},0>(make_obj<@{Int}>(selected.index)); }",
+    code: "Obj<@{Option<Int>}> @{fn}(Obj<@{S}> source, Loc loc) { auto it = @{boxed_call __iter__(S)->I via (0) into $cursor}(source, loc); auto selected = rusk_extreme<false, true>(it, loc, @{boxed_call __iter_has_next__(I)->Bool via ($cursor) into discard}, @{boxed_call __iter_next__(I)->T via ($cursor) into $element}, @{value_call __total_less__<T>(T,T)->Bool via ($element,$element) into discard}); if (!selected.value) return rusk_enum_make<@{Option<Int>},1>(); selected.value.reset(); rusk_guard_iter(it, loc); return rusk_enum_make<@{Option<Int>},0>(make_obj<@{Int}>(selected.index)); }",
 }
 
 /// 要素の全順序で最大となる最初の位置を0始まりで返します。空ならNoneです。
 extern fn argmax<S, I, T>(source: S) -> Option<Int> {
+    effects: "checked_cursor_consume",
     depends: "__runtime_aggregation__",
-    code: "Obj<@{Option<Int>}> @{fn}(Obj<@{S}> source, Loc loc) { auto it = @{boxed_call __iter__(S)->I}(source, loc); auto selected = rusk_extreme<true, true>(it, loc, @{boxed_call __iter_has_next__(I)->Bool}, @{boxed_call __iter_next__(I)->T}, @{value_call __total_less__<T>(T,T)->Bool}); if (!selected.value) return rusk_enum_make<@{Option<Int>},1>(); selected.value.reset(); rusk_guard_iter(it, loc); return rusk_enum_make<@{Option<Int>},0>(make_obj<@{Int}>(selected.index)); }",
+    code: "Obj<@{Option<Int>}> @{fn}(Obj<@{S}> source, Loc loc) { auto it = @{boxed_call __iter__(S)->I via (0) into $cursor}(source, loc); auto selected = rusk_extreme<true, true>(it, loc, @{boxed_call __iter_has_next__(I)->Bool via ($cursor) into discard}, @{boxed_call __iter_next__(I)->T via ($cursor) into $element}, @{value_call __total_less__<T>(T,T)->Bool via ($element,$element) into discard}); if (!selected.value) return rusk_enum_make<@{Option<Int>},1>(); selected.value.reset(); rusk_guard_iter(it, loc); return rusk_enum_make<@{Option<Int>},0>(make_obj<@{Int}>(selected.index)); }",
 }
 
 /// 比較関数で最小となる最初の要素を共有して返します。空ならNoneです。

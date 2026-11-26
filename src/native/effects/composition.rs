@@ -25,7 +25,10 @@ enum Destination<P> {
         parameter: usize,
         path: Vec<P>,
     },
-    Temporary(String),
+    Temporary {
+        name: String,
+        returned: Option<Vec<P>>,
+    },
     Feedback {
         name: String,
         returns: bool,
@@ -57,6 +60,7 @@ impl Specification {
     /// `via (0.source,1) into return.cached`, `into 0.cached`, or `into discard`.
     /// A result routed `into $name` can be passed to a later call.
     /// `into $name to 0.cached` also allows the receiver to save that result.
+    /// `into $name and return.Some.0` additionally shares it in the result.
     /// `into $name again` feeds a new result back to a previously bound local.
     /// `into $name again and return` also returns that local after the loop.
     pub(crate) fn parse(text: &str) -> Result<Self, String> {
@@ -111,8 +115,20 @@ impl Specification {
                     .into(),
                 returns: result.ends_with(" and return"),
             }
+        } else if let Some((name, target)) = result.split_once(" and return.") {
+            let name = temporary(name).ok_or("native result mapping requires a temporary")?;
+            let path = aliases::parse(&format!("return.{target}=0"), 1)?
+                .remove(0)
+                .0;
+            Destination::Temporary {
+                name: name.into(),
+                returned: Some(path),
+            }
         } else if let Some(name) = temporary(result) {
-            Destination::Temporary(name.into())
+            Destination::Temporary {
+                name: name.into(),
+                returned: None,
+            }
         } else if result == "return" || result.starts_with("return.") {
             Destination::Return(aliases::parse(&format!("{result}=0"), 1)?.remove(0).0)
         } else {
@@ -183,7 +199,13 @@ impl Specification {
         };
         let result_path = match &self.result {
             Destination::Discard => Destination::Discard,
-            Destination::Temporary(name) => Destination::Temporary(name.clone()),
+            Destination::Temporary { name, returned } => Destination::Temporary {
+                name: name.clone(),
+                returned: returned
+                    .as_ref()
+                    .map(|path| project(outer_result, path))
+                    .transpose()?,
+            },
             Destination::Return(path) => Destination::Return(project(outer_result, path)?),
             Destination::Feedback { name, returns } => {
                 if *returns && outer_result != result {
@@ -214,7 +236,7 @@ impl Specification {
             argument_types: parameters.to_vec(),
             quiet_result: !matches!(
                 result_path,
-                Destination::Temporary(_)
+                Destination::Temporary { .. }
                     | Destination::Feedback { .. }
                     | Destination::Cache { .. }
             ) || super::quiet_release(result, types),
@@ -443,7 +465,9 @@ fn compose_pass<'a>(
                 }
             }
         }
-        if let Destination::Temporary(name) | Destination::Cache { name, .. } = &dependency.result {
+        if let Destination::Temporary { name, .. } | Destination::Cache { name, .. } =
+            &dependency.result
+        {
             if !base.cursor_step
                 || child.returned.unknown
                 || temporaries.contains_key(name.as_str())
@@ -504,7 +528,12 @@ fn compose_pass<'a>(
                 }
             }
         }
-        if let Destination::Return(target) = &dependency.result {
+        let return_path = match &dependency.result {
+            Destination::Return(path) => Some(path),
+            Destination::Temporary { returned, .. } => returned.as_ref(),
+            _ => None,
+        };
+        if let Some(target) = return_path {
             let returned = child.returned.substitute(&inputs, Default::default());
             if returned.unknown {
                 result.returned.unknown = true;
