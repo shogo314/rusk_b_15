@@ -1,7 +1,7 @@
 //! Give block-local nominal types stable identities without changing source ASTs.
 use super::*;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct LocalTypes {
     bindings: BTreeMap<(scopes::ScopeId, String), String>,
     pub names: BTreeMap<String, Name>,
@@ -178,7 +178,9 @@ impl Compiler {
             }
             ExprKind::Lambda(parameters, body) => {
                 for (_, ty) in parameters {
-                    self.resolve_type_reference(ty, bound);
+                    if let Some(ty) = ty {
+                        self.resolve_type_reference(ty, bound);
+                    }
                 }
                 self.resolve_expression_types(body, bound);
             }

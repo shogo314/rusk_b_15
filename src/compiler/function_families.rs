@@ -166,6 +166,12 @@ impl Compiler {
         expected: Option<&str>,
         span: &Span,
     ) -> Result<Callable, String> {
+        if let Some(probe) = &mut self.lambda_probe
+            && probe.ty == ty
+        {
+            probe.signature = Some(arguments.to_vec());
+            return Err(span.error("reached the inferred lambda invocation"));
+        }
         let Some(family) = self.families.get(ty).cloned() else {
             return self
                 .callables

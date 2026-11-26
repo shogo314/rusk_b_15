@@ -80,7 +80,7 @@ struct Function {
     checked: Option<Body>,
     origin: Origin,
 }
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Compiler {
     local_types: local_types::LocalTypes,
     environments: local_captures::Environments,
@@ -100,6 +100,7 @@ pub struct Compiler {
     family_types: BTreeMap<(String, Vec<scopes::ScopeId>), String>,
     lambda_types: BTreeMap<String, String>,
     lambda_counter: usize,
+    lambda_probe: Option<callables::LambdaProbe>,
     capture_contexts: Vec<callables::CaptureContext>,
     records: BTreeMap<String, records::Record>,
     prepared_records: BTreeSet<String>,
@@ -1067,7 +1068,9 @@ impl Compiler {
                 self.call("value", vec![value], None, &e.span)
             }
             ExprKind::CompareChain(first, rest) => self.comparison_chain(first, rest, &e.span),
-            ExprKind::Lambda(parameters, body) => self.lambda(parameters, body, &e.span),
+            ExprKind::Lambda(parameters, body) => {
+                self.lambda_expression(parameters, body, &e.span, None)
+            }
             ExprKind::Invoke(callee, args) => {
                 self.invoke_expression(callee, args, expected, &e.span)
             }
@@ -1239,7 +1242,14 @@ impl Compiler {
                     } else {
                         builtin_hint.as_deref()
                     };
-                    values.push(self.expr(arg, hint)?);
+                    values.push(self.call_argument(
+                        arg,
+                        hint,
+                        &n.text,
+                        args.len(),
+                        &values,
+                        expected,
+                    )?);
                 }
                 self.call(&n.text, values, expected, &e.span)
             }

@@ -498,7 +498,7 @@ pub enum ExprKind {
     Var(Name),
     Call(Name, Vec<Expr>),
     Invoke(Box<Expr>, Vec<Expr>),
-    Lambda(Vec<(DeclaredName, Name)>, Box<Expr>),
+    Lambda(Vec<(DeclaredName, Option<Name>)>, Box<Expr>),
     Binary(String, Box<Expr>, Box<Expr>),
     Unary(String, Box<Expr>),
     Assign(String, Box<Expr>, Box<Expr>),
@@ -1001,7 +1001,7 @@ fn match_expr(m: &g::MatchExpr<'_>) -> Result<Expr, String> {
             guard: a
                 .match_arm_opt
                 .as_ref()
-                .map(|g| expr(&g.guard.expr))
+                .map(|g| guard_expr(&g.guard.guard_expr))
                 .transpose()?,
             body,
         });
@@ -1021,6 +1021,9 @@ fn expr(e: &g::Expr<'_>) -> Result<Expr, String> {
     Ok(result)
 }
 fn assignment(left: Expr, op: &g::AssignOp<'_>, right: &g::Expr<'_>) -> Result<Expr, String> {
+    Ok(assignment_value(left, op, expr(right)?))
+}
+fn assignment_value(left: Expr, op: &g::AssignOp<'_>, right: Expr) -> Expr {
     let (op, t) = match op {
         g::AssignOp::ColonEqu(x) => (":=", &x.colon_equ),
         g::AssignOp::Equ(x) => ("=", &x.equ),
@@ -1032,30 +1035,59 @@ fn assignment(left: Expr, op: &g::AssignOp<'_>, right: &g::Expr<'_>) -> Result<E
         g::AssignOp::LTQuestEqu(x) => ("<?=", &x.l_t_quest_equ),
         g::AssignOp::GTQuestEqu(x) => (">?=", &x.g_t_quest_equ),
     };
-    Ok(Expr {
+    Expr {
         span: Span::token(t),
-        kind: ExprKind::Assign(op.into(), Box::new(left), Box::new(expr(right)?)),
-    })
+        kind: ExprKind::Assign(op.into(), Box::new(left), Box::new(right)),
+    }
 }
 fn plain_expr(e: &g::PlainExpr<'_>) -> Result<Expr, String> {
     match e {
         g::PlainExpr::Lambda(x) => lambda(&x.lambda),
         g::PlainExpr::BinaryPlainExprOpt(x) => {
-            let first = unary(&x.binary.unary)?;
-            let rest = x
-                .binary
-                .binary_list
-                .iter()
-                .map(|x| Ok((binary_op(&x.binary_op), unary(&x.unary)?)))
-                .collect::<Result<Vec<_>, String>>()?;
-            let value = binary(first, rest)?;
-            if let Some(tail) = &x.plain_expr_opt {
-                assignment(value, &tail.assign_op, &tail.expr)
-            } else {
-                Ok(value)
+            let left = binary_expr(&x.binary)?;
+            match x
+                .plain_expr_opt
+                .as_ref()
+                .map(|tail| tail.expr_tail.as_ref())
+            {
+                Some(g::ExprTail::AssignOpExpr(tail)) => {
+                    assignment(left, &tail.assign_op, &tail.expr)
+                }
+                Some(g::ExprTail::EquGTExpr(tail)) => inferred_lambda(left, &tail.expr),
+                None => Ok(left),
             }
         }
     }
+}
+fn guard_expr(e: &g::GuardExpr<'_>) -> Result<Expr, String> {
+    let result = match e {
+        g::GuardExpr::MatchExpr(x) => match_expr(&x.match_expr),
+        g::GuardExpr::IfExpr(x) => if_expr(&x.if_expr),
+        g::GuardExpr::NonLambdaExpr(x) => non_lambda_expr(&x.non_lambda_expr),
+    }?;
+    result.check_depth(0)?;
+    Ok(result)
+}
+fn non_lambda_expr(e: &g::NonLambdaExpr<'_>) -> Result<Expr, String> {
+    let value = binary_expr(&e.binary)?;
+    if let Some(tail) = &e.non_lambda_expr_opt {
+        Ok(assignment_value(
+            value,
+            &tail.assign_op,
+            guard_expr(&tail.guard_expr)?,
+        ))
+    } else {
+        Ok(value)
+    }
+}
+fn binary_expr(e: &g::Binary<'_>) -> Result<Expr, String> {
+    let first = unary(&e.unary)?;
+    let rest = e
+        .binary_list
+        .iter()
+        .map(|x| Ok((binary_op(&x.binary_op), unary(&x.unary)?)))
+        .collect::<Result<Vec<_>, String>>()?;
+    binary(first, rest)
 }
 fn statement_expr(e: &g::StatementExpr<'_>) -> Result<Expr, String> {
     let result = match e {
@@ -1360,10 +1392,39 @@ fn non_block_primary(e: &g::NonBlockPrimary<'_>) -> Result<Expr, String> {
 }
 
 fn lambda(e: &g::Lambda<'_>) -> Result<Expr, String> {
-    let parameters = parameters(&e.parameters)?;
+    let parameters = parameters(&e.parameters)?
+        .into_iter()
+        .map(|(name, ty)| (name, Some(ty)))
+        .collect();
     Ok(Expr {
         kind: ExprKind::Lambda(parameters, Box::new(expr(&e.expr)?)),
         span: Span::token(&e.l_paren),
+    })
+}
+
+fn inferred_lambda(head: Expr, body: &g::Expr<'_>) -> Result<Expr, String> {
+    let span = head.span.clone();
+    let items = match head.kind {
+        ExprKind::Tuple(items) => items,
+        _ => vec![head],
+    };
+    let parameters = items
+        .into_iter()
+        .map(|item| {
+            let ExprKind::Var(parameter) = item.kind else {
+                return Err(item.span.error("expected a lambda parameter name"));
+            };
+            if parameter.text.contains([':', '<']) {
+                return Err(parameter
+                    .span
+                    .error("expected a simple lambda parameter name"));
+            }
+            Ok((DeclaredName::plain(parameter), None))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(Expr {
+        kind: ExprKind::Lambda(parameters, Box::new(expr(body)?)),
+        span,
     })
 }
 

@@ -158,7 +158,7 @@ expression = if_expression | match_expression | plain_expression ;
 plain_expression = lambda | coalesce [ assignment_operator expression ] ;
 if_expression = "if" condition block "else" block ;
 coalesce   = range [ "??" coalesce ] ;
-lambda     = "(" parameters ")" "=>" expression ;
+lambda     = ( "(" parameters ")" | identifier | "(" identifier { "," identifier } ")" ) "=>" expression ;
 range      = logical_or [ ".." logical_or ] ;
 logical_or = logical_and { "||" logical_and } ;
 logical_and = bit_or { "&&" bit_or } ;
@@ -215,7 +215,7 @@ exponent       = ( "e" | "E" ) [ "+" | "-" ] integer_literal ;
 | 構造体構築 | `Point { x: 1, y: 2 }` | 全フィールドを名前で指定 |
 | 型引数付きの構築 | `Box::<Int> { value: 1 }` | 型引数を明示して構築 |
 
-関数を保持する値を呼べるため、`(f)(x)` や `callbacks[0](x)`、`((x: Int) => x + 1)(3)` が使えます。無名関数の引数名と型は明示します。型・捕捉・コピーの規則は [関数と捕捉](closures.md) を参照してください。型引数付き呼び出しは `f<Int>(x)` ではなく `f::<Int>(x)` です。メソッド形式での明示的な型引数 `a.f::<Int>()` は使えないため、`f::<Int>(a)` と書きます。
+関数を保持する値を呼べるため、`(f)(x)` や `callbacks[0](x)`、`((x: Int) => x + 1)(3)` が使えます。無名関数の引数名は明示し、呼び出しから決まる場合は型を省略できます。型・捕捉・コピーの規則は [関数と捕捉](closures.md) を参照してください。型引数付き呼び出しは `f<Int>(x)` ではなく `f::<Int>(x)` です。メソッド形式での明示的な型引数 `a.f::<Int>()` は使えないため、`f::<Int>(a)` と書きます。
 
 ### カンマと括弧の境界
 

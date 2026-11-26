@@ -1,6 +1,12 @@
 use super::*;
 
 #[derive(Clone)]
+pub(super) struct LambdaProbe {
+    pub ty: String,
+    pub signature: Option<Vec<String>>,
+}
+
+#[derive(Clone)]
 pub(super) struct Callable {
     pub parameters: Vec<String>,
     pub result: String,
@@ -411,6 +417,66 @@ impl Compiler {
 }
 
 impl Compiler {
+    pub(super) fn lambda_expression(
+        &mut self,
+        parameters: &[(DeclaredName, Option<Name>)],
+        body: &Expr,
+        span: &Span,
+        signature: Option<&[String]>,
+    ) -> Result<Value, String> {
+        let parameters = parameters
+            .iter()
+            .enumerate()
+            .map(|(index, (name, ty))| {
+                let ty = match ty {
+                    Some(ty) => ty.clone(),
+                    None => {
+                        let inferred =
+                            signature
+                                .and_then(|types| types.get(index))
+                                .ok_or_else(|| {
+                                    name.span.error(format!(
+                            "cannot infer type of lambda parameter '{}'; add a type annotation",
+                            name.text
+                        ))
+                                })?;
+                        Name {
+                            text: inferred.clone(),
+                            span: name.span.clone(),
+                            constant: None,
+                        }
+                    }
+                };
+                Ok((name.clone(), ty))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        self.lambda(&parameters, body, span)
+    }
+
+    pub(super) fn call_argument(
+        &mut self,
+        arg: &Expr,
+        hint: Option<&str>,
+        name: &str,
+        count: usize,
+        known: &[Value],
+        expected: Option<&str>,
+    ) -> Result<Value, String> {
+        if !self.context.diverged
+            && let ExprKind::Lambda(parameters, body) = &arg.kind
+            && parameters.iter().any(|(_, ty)| ty.is_none())
+        {
+            let signatures = self.callback_parameter_hints(name, count, known, expected);
+            if signatures.len() == 1
+                && let Some(signature) = signatures.first()
+                && parameters.len() == signature.len()
+            {
+                return self.lambda_expression(parameters, body, &arg.span, Some(signature));
+            }
+        }
+        self.expr(arg, hint)
+    }
+
     pub(super) fn invoke_arguments(
         &mut self,
         callee: Value,
@@ -476,7 +542,14 @@ impl Compiler {
                 } else {
                     None
                 };
-                values.push(self.expr(arg, hint)?);
+                values.push(self.call_argument(
+                    arg,
+                    hint,
+                    &name.text,
+                    args.len() + 1,
+                    &values,
+                    expected,
+                )?);
             }
             return self.call(&name.text, values, expected, span);
         }

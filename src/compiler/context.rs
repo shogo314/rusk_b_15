@@ -22,7 +22,7 @@ pub(super) struct LoopContext {
     pub(super) break_states: Vec<Vec<BTreeMap<String, Variable>>>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct FunctionContext {
     pub(super) ready_generics: BTreeSet<usize>,
     pub(super) ready_functions: BTreeSet<usize>,

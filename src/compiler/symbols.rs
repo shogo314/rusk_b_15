@@ -1,6 +1,7 @@
 //! Dependencies between explicitly declared target-language fragments.
 use super::*;
 
+#[derive(Clone)]
 pub(super) struct Symbol {
     pub code: String,
     dependencies: BTreeSet<String>,

@@ -3,7 +3,7 @@ use super::*;
 use crate::analysis::effects::{Effect, Summary};
 use crate::native::{effects::composition::Dependency, lowering::Lowering};
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct NativeFunctionInfo {
     pub(super) contract: Option<Summary>,
     // None means there was no dependency registration. Some(empty) still marks

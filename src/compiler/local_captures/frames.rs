@@ -13,6 +13,7 @@ pub(in crate::compiler) enum CaptureReference {
     Capture(CaptureKey),
 }
 
+#[derive(Clone)]
 pub(super) struct CaptureFrame {
     parent: Option<usize>,
     owner: Option<usize>,

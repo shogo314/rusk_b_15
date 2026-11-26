@@ -432,3 +432,48 @@ wt independent, original[0][0];
         }
     }
 }
+
+#[test]
+fn callbacks_can_infer_lambda_parameters() {
+    let source = r#"
+fn apply<T, F>(x: T, callback: F) -> T { return callback(x); }
+struct Card { value: Int; }
+let cards := [Card { value: 3 }, Card { value: 1 }];
+cards.sort_by_key(card => card.value);
+let calls := 0;
+let values := cards.map(card => { calls += 1; card.value });
+wt calls;
+wt values.filter(x => x > 1).to_vec(), calls;
+wt [1, 2, 3].fold(0, (acc, x) => acc + x);
+wt apply(5, x => x + 2);
+readonly let xs := [1, 2];
+wt xs.map(x => x + 1).sum();
+match true { ok if ok => { wt 8; } _ => {} }
+"#;
+    let expected = "0\n3 2\n6\n7\n5\n8\n";
+    runs(source, expected);
+    let typed = source
+        .replace("card =>", "(card: Card) =>")
+        .replace("x =>", "(x: Int) =>")
+        .replace("(acc, x) =>", "(acc: Int, x: Int) =>");
+    runs(&typed, expected);
+
+    for (source, expected) in [
+        (
+            "let f := x => x;",
+            "cannot infer type of lambda parameter 'x'",
+        ),
+        (
+            "readonly let xs := [1]; wt xs.map(x => { x = 2; x }).sum();",
+            "readonly",
+        ),
+    ] {
+        let case = Case::new(source);
+        for options in [&[][..], &["--no-opt"][..]] {
+            let output = case.compile_with_options(options);
+            assert!(!output.status.success());
+            let error = String::from_utf8_lossy(&output.stderr);
+            assert!(error.contains(expected), "{error}");
+        }
+    }
+}

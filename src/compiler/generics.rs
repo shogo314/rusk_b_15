@@ -738,6 +738,127 @@ impl Compiler {
         !found
     }
 
+    pub(super) fn callback_parameter_hints(
+        &self,
+        name: &str,
+        count: usize,
+        known: &[Value],
+        expected: Option<&str>,
+    ) -> BTreeSet<Vec<String>> {
+        let base = type_parts(name).map_or(name, |(base, _)| base);
+        let lookup = self.source_function_name(base);
+        let scopes = self.function_scopes(
+            name,
+            &known
+                .iter()
+                .map(|value| value.ty.clone())
+                .collect::<Vec<_>>(),
+        );
+        let mut hints = BTreeSet::new();
+        for (template, function) in self.generic_functions.iter().enumerate() {
+            if function.name.text != lookup
+                || !scopes.contains(&function.scope)
+                || function.arguments.len() != count
+            {
+                continue;
+            }
+            let Some(mut bindings) = explicit_bindings(name, &function.parameters) else {
+                continue;
+            };
+            if !function
+                .arguments
+                .iter()
+                .zip(known)
+                .all(|((_, ty), value)| {
+                    unify(&ty.text, &value.ty, &function.parameters, &mut bindings)
+                })
+            {
+                continue;
+            }
+            if !matches!(
+                function.infer_requirements(
+                    self,
+                    0,
+                    &mut QueryBudget::new(),
+                    expected,
+                    &mut bindings
+                ),
+                Ok(true)
+            ) {
+                continue;
+            }
+            let callback_type = &function.arguments[known.len()].1.text;
+            if function.body.is_some()
+                && known.len() + 1 == count
+                && self.lambda_probe.is_none()
+                && function.parameters.iter().any(|p| p.text == *callback_type)
+                && !bindings.contains_key(callback_type)
+                && function
+                    .parameters
+                    .iter()
+                    .all(|p| p.text == *callback_type || bindings.contains_key(&p.text))
+                && let Some(signature) =
+                    self.probe_callback(template, callback_type, bindings.clone())
+            {
+                hints.insert(signature);
+            }
+            for requirement in &function.callbacks {
+                if &requirement.ty == callback_type
+                    && requirement
+                        .parameters
+                        .iter()
+                        .all(|ty| bound(ty, &function.parameters, &bindings))
+                {
+                    hints.insert(
+                        requirement
+                            .parameters
+                            .iter()
+                            .map(|ty| substitute(ty, &bindings))
+                            .collect(),
+                    );
+                }
+            }
+        }
+        hints
+    }
+
+    fn probe_callback(
+        &self,
+        template: usize,
+        callback_type: &str,
+        mut bindings: BTreeMap<String, String>,
+    ) -> Option<Vec<String>> {
+        // The probe stops at the callback invocation. All of its declarations,
+        // capture layouts and partially checked bodies belong to the clone.
+        let mut probe = self.clone();
+        let name = probe.generic_functions[template].name.clone();
+        let placeholder = probe
+            .lambda(
+                &[],
+                &Expr {
+                    kind: ExprKind::Block(vec![], None),
+                    span: name.span.clone(),
+                },
+                &name.span,
+            )
+            .ok()?;
+        bindings.insert(callback_type.into(), placeholder.ty.clone());
+        probe.lambda_probe = Some(callables::LambdaProbe {
+            ty: placeholder.ty,
+            signature: None,
+        });
+        let function = probe
+            .instantiate_generic(
+                SelectedGeneric { template, bindings },
+                &name.text,
+                &[],
+                &name.span,
+            )
+            .ok()?;
+        let _ = probe.compile_function(function);
+        probe.lambda_probe?.signature
+    }
+
     pub(super) fn argument_hints(
         &self,
         name: &str,
@@ -1161,7 +1282,9 @@ fn substitute_expr(expr: &mut Expr, bindings: &BTreeMap<String, String>) {
         }
         ExprKind::Lambda(parameters, body) => {
             for (_, ty) in parameters {
-                substitute_name(ty, bindings);
+                if let Some(ty) = ty {
+                    substitute_name(ty, bindings);
+                }
             }
             substitute_expr(body, bindings);
         }

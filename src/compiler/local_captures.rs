@@ -29,6 +29,7 @@ pub(super) struct CaptureSite {
     span: Span,
 }
 
+#[derive(Clone)]
 pub(super) struct ClosureLayout {
     pub ty: String,
     pub base_fields: usize,
@@ -44,7 +45,7 @@ impl ClosureLayout {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Environments {
     pub locals: BTreeMap<usize, LocalFunction>,
     sites: BTreeMap<ValueId, CaptureSite>,
@@ -64,7 +65,7 @@ enum Declaration {
     Generic(usize),
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct GenericEnvironment {
     available: Option<BTreeMap<String, Variable>>,
     sources: BTreeMap<String, CaptureOrigin>,

@@ -8,6 +8,7 @@ impl ScopeId {
     pub(super) const ROOT: Self = Self(0);
 }
 
+#[derive(Clone)]
 pub(super) struct DeclarationScopes {
     parents: Vec<Option<ScopeId>>,
 }
